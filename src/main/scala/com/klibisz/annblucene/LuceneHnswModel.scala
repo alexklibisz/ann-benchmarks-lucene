@@ -2,15 +2,15 @@ package com.klibisz.annblucene
 import com.klibisz.annblucene.LuceneHnswModel.SearchStrategy
 import org.apache.lucene.codecs.Codec
 import org.apache.lucene.codecs.lucene90.Lucene90VectorReader
-import org.apache.lucene.document.{FieldType, StoredField, VectorField}
+import org.apache.lucene.document.{FieldType, VectorField}
 import org.apache.lucene.index._
 import org.apache.lucene.store.MMapDirectory
 import org.apache.lucene.util.hnsw.{HnswGraph, HnswGraphBuilder, NeighborQueue}
 
 import java.nio.file.{Files, Path}
+import java.util.Collections
+import scala.collection.JavaConverters._
 import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
-import scala.jdk.CollectionConverters._
 import scala.util.Try
 
 final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, LuceneHnswModel.SearchParameters] {
@@ -65,7 +65,7 @@ final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, Lucen
     Try {
       val writer    = indexWriters(indexName)
       val fieldType = fieldTypes(indexName)
-      val documents = vectors.map(vec => java.util.List.of(new VectorField(vecFieldName, vec, fieldType)))
+      val documents = vectors.map(vec => Collections.singletonList(new VectorField(vecFieldName, vec, fieldType)))
       writer.addDocuments(documents.asJavaCollection)
       documents.length
     }
