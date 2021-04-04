@@ -1,0 +1,134 @@
+package com.klibisz.annblucene
+import com.klibisz.annblucene.LuceneHnswModel.SearchStrategy
+import org.apache.lucene.codecs.Codec
+import org.apache.lucene.codecs.lucene90.Lucene90VectorReader
+import org.apache.lucene.document.{FieldType, StoredField, VectorField}
+import org.apache.lucene.index._
+import org.apache.lucene.store.MMapDirectory
+import org.apache.lucene.util.hnsw.{HnswGraph, HnswGraphBuilder, NeighborQueue}
+
+import java.nio.file.{Files, Path}
+import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters._
+import scala.util.Try
+
+final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, LuceneHnswModel.SearchParameters] {
+
+  private val tmpDirectories: mutable.Map[String, Path]                                     = mutable.Map.empty
+  private val indexWriters: mutable.Map[String, IndexWriter]                                = mutable.Map.empty
+  private val fieldTypes: mutable.Map[String, FieldType]                                    = mutable.Map.empty
+  private val indexReaders: mutable.Map[String, IndexReader]                                = mutable.Map.empty
+  private val vectorValues: mutable.Map[String, (RandomAccessVectorValues, KnnGraphValues)] = mutable.Map.empty
+
+  private val vecFieldName = "vec"
+
+  private val rng = new java.util.Random(0)
+
+  private val strategyMap: Map[SearchStrategy, VectorValues.SearchStrategy] = Map(
+    SearchStrategy.EuclideanHnsw  -> VectorValues.SearchStrategy.EUCLIDEAN_HNSW,
+    SearchStrategy.DotProductHnsw -> VectorValues.SearchStrategy.DOT_PRODUCT_HNSW
+  )
+
+  override def createIndex(
+      indexName: String,
+      indexParams: LuceneHnswModel.IndexParameters
+  ): Try[Unit] =
+    Try {
+      val tmpDir            = Files.createTempDirectory(null)
+      val indexDir          = new MMapDirectory(tmpDir)
+      val indexWriterConfig = new IndexWriterConfig().setCodec(Codec.forName("Lucene90"))
+      val indexWriter       = new IndexWriter(indexDir, indexWriterConfig)
+      val fieldType: FieldType = VectorField.createHnswType(
+        indexParams.dims,
+        strategyMap(indexParams.searchStrategy),
+        indexParams.maxConnections,
+        indexParams.beamWidth
+      )
+      fieldTypes += (indexName     -> fieldType)
+      tmpDirectories += (indexName -> tmpDir)
+      indexWriters += (indexName   -> indexWriter)
+    }
+
+  override def deleteIndex(indexName: String): Try[Unit] =
+    Try {
+      indexWriters.remove(indexName)
+      indexReaders.remove(indexName)
+      tmpDirectories.get(indexName).foreach(Files.deleteIfExists)
+      tmpDirectories.remove(indexName)
+    }
+
+  override def indexVectors(
+      indexName: String,
+      vectors: Seq[Array[Float]]
+  ): Try[Int] =
+    Try {
+      val writer    = indexWriters(indexName)
+      val fieldType = fieldTypes(indexName)
+      val documents = vectors.map(vec => java.util.List.of(new VectorField(vecFieldName, vec, fieldType)))
+      writer.addDocuments(documents.asJavaCollection)
+      documents.length
+    }
+
+  override def closeIndex(indexName: String): Try[Unit] =
+    Try {
+      val w = indexWriters(indexName)
+      w.forceMerge(1, true)
+      w.close()
+
+      val indexReader = DirectoryReader.open(new MMapDirectory(tmpDirectories(indexName)))
+      val leaves      = indexReader.leaves().asScala
+      assert(leaves.length == 1, s"Expected 1 leaf but got ${leaves.length}.")
+
+      val cr: CodecReader              = leaves.head.reader().asInstanceOf[CodecReader]
+      val vr: Lucene90VectorReader     = cr.getVectorReader.asInstanceOf[Lucene90VectorReader]
+      val rv: RandomAccessVectorValues = cr.getVectorValues(vecFieldName).asInstanceOf[RandomAccessVectorValues]
+      val gv: KnnGraphValues           = vr.getGraphValues(vecFieldName)
+      vectorValues += (indexName -> (rv, gv))
+    }
+
+  override def search(
+      indexName: String,
+      k: Int,
+      searchParams: LuceneHnswModel.SearchParameters,
+      vector: Array[Float]
+  ): Try[Vector[(Int, Float)]] =
+    Try {
+      val (rv, gv)                     = vectorValues(indexName)
+      val nq: NeighborQueue            = HnswGraph.search(vector, k, searchParams.numSeed, rv, gv, rng)
+      val results: Array[(Int, Float)] = new Array(k)
+
+      var i = 0
+      while (i < results.length) {
+        results.update(i, (nq.topNode(), nq.topScore()))
+        nq.pop()
+        i += 1
+      }
+      results.toVector
+    }
+}
+
+object LuceneHnswModel {
+
+  sealed trait SearchStrategy
+  object SearchStrategy {
+    case object EuclideanHnsw  extends SearchStrategy
+    case object DotProductHnsw extends SearchStrategy
+  }
+
+  /** Parameters used to construct HNSW model via [[org.apache.lucene.document.VectorField.createHnswType]] */
+  case class IndexParameters(
+      dims: Int,
+      searchStrategy: SearchStrategy,
+      maxConnections: Int,
+      beamWidth: Int
+  )
+  object IndexParameters {
+    def apply(dims: Int, searchStrategy: SearchStrategy) =
+      new IndexParameters(dims, searchStrategy, HnswGraphBuilder.DEFAULT_MAX_CONN, HnswGraphBuilder.DEFAULT_BEAM_WIDTH)
+  }
+
+  /** Parameters used to execute HNSW search via [[org.apache.lucene.util.hnsw.HnswGraph.search]] */
+  case class SearchParameters(numSeed: Int)
+
+}
