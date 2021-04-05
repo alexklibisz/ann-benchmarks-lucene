@@ -24,11 +24,11 @@ jobs:
         with:
           java-version: 14
       - name: update
-        run: sbt -batch update"
+        run: sbt -batch update
       - name: compile
-        run: sbt -batch compile"
+        run: sbt -batch compile
       - name: test-compile
-        run: sbt -batch test:compile"
+        run: sbt -batch test:compile
       - name: assembly
         run: sbt -batch assembly
       - name: test
