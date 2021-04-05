@@ -85,6 +85,7 @@ final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, Lucen
       Failure(new IllegalStateException(s"Index $indexName is closed"))
     } else
       Try {
+        logger.info(s"Indexing ${vectors.length} vectors to $indexName")
         val t0        = System.nanoTime()
         val writer    = indexWriters(indexName)
         val fieldType = fieldTypes(indexName)
@@ -99,6 +100,7 @@ final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, Lucen
 
   override def closeIndex(indexName: String): Try[Unit] =
     Try {
+      logger.info(s"Closing index $indexName")
       val t0 = System.nanoTime()
       val w  = indexWriters(indexName)
       w.forceMerge(1)
