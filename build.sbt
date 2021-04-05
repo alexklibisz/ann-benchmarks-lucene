@@ -35,4 +35,4 @@ fork in Test := true
 testOptions in Test += Tests.Argument("-oD")
 
 test in assembly := {}
-assemblyJarName in assembly := s"${name.value}-${version.value}.jar"
+assemblyJarName in assembly := s"${name.value}.jar"
