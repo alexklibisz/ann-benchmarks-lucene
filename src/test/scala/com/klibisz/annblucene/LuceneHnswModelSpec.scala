@@ -1,42 +1,65 @@
 package com.klibisz.annblucene
 
+import akka.http.scaladsl.model.StatusCodes
+import akka.http.scaladsl.testkit.{RouteTestTimeout, ScalatestRouteTest}
+import akka.testkit.TestDuration
+import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.concurrent.duration.Duration
-import scala.util.Success
+import scala.concurrent.duration.DurationInt
 
-class LuceneHnswModelSpec extends AnyFreeSpec with Matchers with GloveVectors with Timing {
+class LuceneHnswModelSpec extends AnyFreeSpec with Matchers with GloveVectors with ScalatestRouteTest {
 
-  "sanity check on glove vectors" - {
+  "end-to-end with glove vectors" - {
 
     val model        = new LuceneHnswModel
     val indexName    = "test"
     val indexParams  = LuceneHnswModel.IndexParameters(50, LuceneHnswModel.SearchStrategy.DotProductHnsw, 32, 100)
     val searchParams = LuceneHnswModel.SearchParameters(100)
 
+    import FailFastCirceSupport._
+    import LuceneHnswModel.CirceCodecs._
+    val modelRoutes = new ModelRoutes(model)
+    val route       = modelRoutes.route
+
+    implicit val timeout = RouteTestTimeout(5.seconds.dilated)
+
     "read vectors" in {
       getGloveVectors.length shouldBe 400000
     }
 
-    "end-to-end" in {
-      timeInfo("create index") {
-        model.createIndex(indexName, indexParams) shouldBe Success(())
+    "create index" in {
+      Put(s"/$indexName", indexParams) ~> route ~> check {
+        response.status shouldBe StatusCodes.OK
       }
+    }
 
-      timeInfo("index vectors") {
-        model.indexVectors(indexName, getGloveVectors.map(_._2)) shouldBe Success(getGloveVectors.length)
+    "index vectors" in {
+      Post(s"/$indexName", getGloveVectors.map(_._2)) ~> route ~> check {
+        response.status shouldBe StatusCodes.Created
       }
+    }
 
-      timeInfo("close index") {
-        model.closeIndex(indexName) shouldBe Success(())
+    "close index" in {
+      Post(s"/$indexName/close") ~> route ~> check {
+        response.status shouldBe StatusCodes.OK
       }
+    }
 
-      timeInfo("search") {
-        val queryVector  = getGloveVectors.filter(_._1 == "president").head._2
-        val indexResults = model.search(indexName, 5, searchParams, queryVector)
-        val words        = indexResults.map(_.map(_._1).map(getGloveVectors(_)._1))
-        words shouldBe Success(Vector("president", "minister", "secretary", "chairman", "leader"))
+    "search" in {
+      val queryVector = getGloveVectors.filter(_._1 == "president").head._2
+      Post(s"/$indexName/search", modelRoutes.SearchRequest(5, searchParams, queryVector)) ~> route ~> check {
+        response.status shouldBe StatusCodes.OK
+        val results = entityAs[Vector[(Int, Float)]]
+        val words   = results.map(_._1).map(getGloveVectors(_)._1)
+        words shouldBe Vector("president", "minister", "secretary", "chairman", "leader")
+      }
+    }
+
+    "delete index" in {
+      Delete(s"/$indexName") ~> route ~> check {
+        response.status shouldBe StatusCodes.OK
       }
     }
 

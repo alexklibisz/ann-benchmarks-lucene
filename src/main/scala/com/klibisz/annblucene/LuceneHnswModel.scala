@@ -1,23 +1,25 @@
 package com.klibisz.annblucene
 
-import com.klibisz.annblucene.LuceneHnswModel.{IndexParameters, SearchStrategy}
-import io.circe.Decoder.Result
+import com.klibisz.annblucene.LuceneHnswModel.SearchStrategy
+import com.typesafe.scalalogging.StrictLogging
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
-import io.circe.{Decoder, DecodingFailure, Encoder, HCursor}
+import io.circe.{Decoder, DecodingFailure, Encoder, HCursor, Json}
+import org.apache.commons.io.FileUtils
 import org.apache.lucene.codecs.Codec
 import org.apache.lucene.codecs.lucene90.Lucene90VectorReader
 import org.apache.lucene.document.{FieldType, VectorField}
 import org.apache.lucene.index._
-import org.apache.lucene.store.MMapDirectory
+import org.apache.lucene.store.{Directory, MMapDirectory}
 import org.apache.lucene.util.hnsw.{HnswGraph, HnswGraphBuilder, NeighborQueue}
 
 import java.nio.file.{Files, Path}
 import java.util.Collections
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.collection.mutable
+import scala.concurrent.duration.DurationLong
 import scala.util.{Failure, Try}
 
-final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, LuceneHnswModel.SearchParameters] {
+final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, LuceneHnswModel.SearchParameters] with StrictLogging {
 
   private val tmpDirectories: mutable.Map[String, Path]                                     = mutable.Map.empty
   private val indexWriters: mutable.Map[String, IndexWriter]                                = mutable.Map.empty
@@ -39,10 +41,14 @@ final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, Lucen
       indexParams: LuceneHnswModel.IndexParameters
   ): Try[Unit] = {
     if (tmpDirectories.contains(indexName)) {
-      Failure(new IllegalStateException(s"Index [$indexName] already exists"))
+      Failure(new IllegalStateException(s"Index $indexName already exists"))
     } else
       Try {
-        val tmpDir            = Files.createTempDirectory(null)
+        val tmpDir = Files.createTempDirectory("lucenehnsw-")
+        FileUtils.forceDeleteOnExit(tmpDir.toFile)
+
+        logger.info(s"Creating new index in directory $tmpDir")
+
         val indexDir          = new MMapDirectory(tmpDir)
         val indexWriterConfig = new IndexWriterConfig().setCodec(Codec.forName("Lucene90"))
         val indexWriter       = new IndexWriter(indexDir, indexWriterConfig)
@@ -52,6 +58,7 @@ final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, Lucen
           indexParams.maxConnections,
           indexParams.beamWidth
         )
+
         fieldTypes += (indexName     -> fieldType)
         tmpDirectories += (indexName -> tmpDir)
         indexWriters += (indexName   -> indexWriter)
@@ -60,34 +67,44 @@ final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, Lucen
 
   override def deleteIndex(indexName: String): Try[Unit] =
     Try {
+
       indexWriters.remove(indexName)
       indexReaders.remove(indexName)
-      tmpDirectories.get(indexName).foreach(Files.deleteIfExists)
+      tmpDirectories.get(indexName).map(_.toFile).foreach(FileUtils.deleteDirectory)
       tmpDirectories.remove(indexName)
     }
 
   override def indexVectors(
       indexName: String,
       vectors: Seq[Array[Float]]
-  ): Try[Int] =
+  ): Try[Int] = {
+    // Note: The call to forceMerge in closeIndex seems to be way faster if you use larger batches when indexing.
     if (!tmpDirectories.contains(indexName)) {
-      Failure(new IllegalStateException(s"Index [$indexName] does not exist"))
+      Failure(new IllegalStateException(s"Index $indexName does not exist"))
     } else if (vectorValues.contains(indexName)) {
-      Failure(new IllegalStateException(s"Index [$indexName] is closed"))
+      Failure(new IllegalStateException(s"Index $indexName is closed"))
     } else
       Try {
+        val t0        = System.nanoTime()
         val writer    = indexWriters(indexName)
         val fieldType = fieldTypes(indexName)
         val documents = vectors.map(vec => Collections.singletonList(new VectorField(vecFieldName, vec, fieldType)))
         writer.addDocuments(documents.asJavaCollection)
+        writer.flush()
+        val dur = System.nanoTime() - t0
+        logger.info(s"Indexed ${vectors.length} vectors to $indexName in ${dur.nanos.toMillis} ms")
         documents.length
       }
+  }
 
   override def closeIndex(indexName: String): Try[Unit] =
     Try {
-      val w = indexWriters(indexName)
-      w.forceMerge(1, true)
+      val t0 = System.nanoTime()
+      val w  = indexWriters(indexName)
+      w.forceMerge(1)
       w.close()
+      val dur = System.nanoTime() - t0
+      logger.info(s"Closed and merged index $indexName in ${dur.nanos.toMillis} ms")
 
       val indexReader = DirectoryReader.open(new MMapDirectory(tmpDirectories(indexName)))
       val leaves      = indexReader.leaves().asScala
@@ -127,18 +144,6 @@ object LuceneHnswModel {
   object SearchStrategy {
     case object EuclideanHnsw  extends SearchStrategy
     case object DotProductHnsw extends SearchStrategy
-
-    implicit val decoder: Decoder[SearchStrategy] =
-      (c: HCursor) =>
-        for {
-          s <- c.as[String]
-          r <- s.toLowerCase() match {
-            case "euclideanhnsw"  => Right(EuclideanHnsw)
-            case "dotproducthnsw" => Right(DotProductHnsw)
-            case other            => Left(DecodingFailure(s"Invalid search strategy: ${other}", List.empty))
-          }
-        } yield r
-
   }
 
   /** Parameters used to construct HNSW model via [[org.apache.lucene.document.VectorField.createHnswType]] */
@@ -151,13 +156,33 @@ object LuceneHnswModel {
   object IndexParameters {
     def apply(dims: Int, searchStrategy: SearchStrategy) =
       new IndexParameters(dims, searchStrategy, HnswGraphBuilder.DEFAULT_MAX_CONN, HnswGraphBuilder.DEFAULT_BEAM_WIDTH)
-
-    implicit val decoder: Decoder[IndexParameters] = deriveDecoder[IndexParameters]
   }
 
   /** Parameters used to execute HNSW search via [[org.apache.lucene.util.hnsw.HnswGraph.search]] */
   case class SearchParameters(numSeed: Int)
-  object SearchParameters {
-    implicit val decoder: Decoder[SearchParameters] = deriveDecoder[SearchParameters]
+
+  /** Codecs for parsing JSON versions of the above classes. */
+  object CirceCodecs {
+    implicit val searchStrategyDecoder: Decoder[SearchStrategy] =
+      (c: HCursor) =>
+        for {
+          s <- c.as[String]
+          r <- s.toLowerCase() match {
+            case "euclideanhnsw"  => Right(SearchStrategy.EuclideanHnsw)
+            case "dotproducthnsw" => Right(SearchStrategy.DotProductHnsw)
+            case other            => Left(DecodingFailure(s"Invalid search strategy: ${other}", List.empty))
+          }
+        } yield r
+    implicit val searchStrategyEncoder: Encoder[SearchStrategy] = {
+      case SearchStrategy.EuclideanHnsw  => Json.fromString("euclideanhnsw")
+      case SearchStrategy.DotProductHnsw => Json.fromString("dotproducthnsw")
+    }
+
+    implicit val indexParametersDecoder: Decoder[IndexParameters] = deriveDecoder
+    implicit val indexParametersEncoder: Encoder[IndexParameters] = deriveEncoder
+
+    implicit val searchParametersDecoder: Decoder[SearchParameters] = deriveDecoder
+    implicit val searchParametersEncoder: Encoder[SearchParameters] = deriveEncoder
   }
+
 }
