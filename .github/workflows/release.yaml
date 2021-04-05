@@ -1,0 +1,24 @@
+name: Release
+on:
+  repository_dispatch:
+    types: release
+
+jobs:
+  release:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: olafurpg/setup-scala@v10
+        with:
+          java-version: 14
+      - name: Assemble
+        run: sbt -batch assembly
+      - name: Install Hub
+        run: sudo snap install hub --classic
+      - name: Publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          export VERSION=$(sbt -Dsbt.supershell=false -error "print version")
+          echo $VERSION > /tmp/release.md
+          hub release create -p -F /tmp/release.md -a target/scala-2.13/ann-benchmarks-lucene.jar {{ .VERSION }}
