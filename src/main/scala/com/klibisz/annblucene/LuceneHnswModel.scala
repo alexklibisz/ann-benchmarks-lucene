@@ -47,7 +47,7 @@ final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, Lucen
         val tmpDir = Files.createTempDirectory("lucenehnsw-")
         FileUtils.forceDeleteOnExit(tmpDir.toFile)
 
-        logger.info(s"Creating new index in directory $tmpDir")
+        logger.info(s"Creating new index $indexName with parameters $indexParams in directory $tmpDir")
 
         val indexDir          = new MMapDirectory(tmpDir)
         val indexWriterConfig = new IndexWriterConfig().setCodec(Codec.forName("Lucene90"))
