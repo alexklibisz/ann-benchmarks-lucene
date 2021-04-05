@@ -16,8 +16,10 @@ final class ModelRoutes[IP: Encoder: Decoder, SP: Encoder: Decoder](model: Model
     implicit val encoder: Encoder[SearchRequest] = deriveEncoder[SearchRequest]
   }
 
-  def route: Route =
-    pathPrefix(Segment) { indexName: String =>
+  def route: Route = {
+    path("ready") {
+      complete(StatusCodes.OK)
+    } ~ pathPrefix(Segment) { indexName: String =>
       (pathEnd & put) {
         entity(as[IP]) { ip =>
           complete(model.createIndex(indexName, ip).map(_ => StatusCodes.OK))
@@ -38,5 +40,6 @@ final class ModelRoutes[IP: Encoder: Decoder, SP: Encoder: Decoder](model: Model
         complete(model.deleteIndex(indexName).map(_ => StatusCodes.OK))
       }
     }
+  }
 
 }

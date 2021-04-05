@@ -13,6 +13,6 @@ trait Model[IP, SP] {
 
   def closeIndex(indexName: String): Try[Unit]
 
-  def search(indexName: String, k: Int, searchParams: SP, vector: Array[Float]): Try[Vector[(Int, Float)]]
+  def search(indexName: String, k: Int, searchParams: SP, vector: Array[Float]): Try[Array[Int]]
 
 }

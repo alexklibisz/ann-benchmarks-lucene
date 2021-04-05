@@ -122,19 +122,17 @@ final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, Lucen
       k: Int,
       searchParams: LuceneHnswModel.SearchParameters,
       vector: Array[Float]
-  ): Try[Vector[(Int, Float)]] =
+  ): Try[Array[Int]] =
     Try {
-      val (rv, gv)                     = vectorValues(indexName)
-      val nq: NeighborQueue            = HnswGraph.search(vector, k, searchParams.numSeed, rv, gv, rng)
-      val results: Array[(Int, Float)] = new Array(k)
-
-      var i = results.length - 1
+      val (rv, gv)            = vectorValues(indexName)
+      val nq: NeighborQueue   = HnswGraph.search(vector, k, searchParams.numSeed, rv, gv, rng)
+      val results: Array[Int] = new Array(k)
+      var i                   = results.length - 1
       while (i >= 0) {
-        results.update(i, (nq.topNode(), nq.topScore()))
-        nq.pop()
+        results.update(i, nq.pop())
         i -= 1
       }
-      results.toVector
+      results
     }
 }
 

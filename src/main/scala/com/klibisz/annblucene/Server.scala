@@ -16,8 +16,8 @@ object Server extends StrictLogging {
     } else ???
 
     implicit val system = ActorSystem("annblucene")
-    val server          = Http().newServerAt("localhost", 8080)
-    logger.info(s"Starting ${args.head} model on localhost:8080")
+    val server          = Http().newServerAt("0.0.0.0", 8080)
+    logger.info(s"Starting ${args.head} model on port 8080")
     server.bind(routes)
   }
 

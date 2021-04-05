@@ -51,8 +51,8 @@ class LuceneHnswModelSpec extends AnyFreeSpec with Matchers with GloveVectors wi
       val queryVector = getGloveVectors.filter(_._1 == "president").head._2
       Post(s"/$indexName/search", modelRoutes.SearchRequest(5, searchParams, queryVector)) ~> route ~> check {
         response.status shouldBe StatusCodes.OK
-        val results = entityAs[Vector[(Int, Float)]]
-        val words   = results.map(_._1).map(getGloveVectors(_)._1)
+        val results = entityAs[Vector[Int]]
+        val words   = results.map(getGloveVectors(_)._1)
         words shouldBe Vector("president", "minister", "secretary", "chairman", "leader")
       }
     }
