@@ -20,5 +20,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           export VERSION=$(sbt -Dsbt.supershell=false -error "print version")
-          echo "$VERSION\n\nRelease for version $VERSION" > /tmp/release.md
+          echo $VERSION > /tmp/release.md
+          echo "" >> /tmp/release.md
+          echo "Release for version $VERSION" >> /tmp/release.md
           hub release create -p -F /tmp/release.md -a target/scala-2.13/ann-benchmarks-lucene.jar $VERSION

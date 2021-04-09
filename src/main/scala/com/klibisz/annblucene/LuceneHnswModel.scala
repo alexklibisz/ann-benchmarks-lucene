@@ -1,6 +1,7 @@
 package com.klibisz.annblucene
 
 import com.klibisz.annblucene.LuceneHnswModel.SearchStrategy
+import com.typesafe.scalalogging.StrictLogging
 import io.circe.generic.semiauto.{deriveDecoder, deriveEncoder}
 import io.circe._
 import org.apache.commons.io.FileUtils
@@ -18,7 +19,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Try}
 
-final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, LuceneHnswModel.SearchParameters] {
+final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, LuceneHnswModel.SearchParameters] with StrictLogging {
 
   private val tmpDirectories: mutable.Map[String, Path]                                     = mutable.Map.empty
   private val buffers: mutable.Map[String, ArrayBuffer[Array[Float]]]                       = mutable.Map.empty
@@ -42,6 +43,7 @@ final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, Lucen
       Failure(new IllegalStateException(s"Index $indexName already exists"))
     } else
       Try {
+        logger.debug(s"Creating index $indexName.")
         buffers += (indexName -> ArrayBuffer.empty)
         fieldTypes += (indexName -> VectorField.createHnswType(
           indexParams.dims,
@@ -54,6 +56,7 @@ final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, Lucen
 
   override def deleteIndex(indexName: String): Try[Unit] =
     Try {
+      logger.debug(s"Deleting index $indexName.")
       tmpDirectories.get(indexName).map(_.toFile).foreach(FileUtils.deleteDirectory)
       tmpDirectories.remove(indexName)
     }
@@ -68,7 +71,8 @@ final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, Lucen
       Failure(new IllegalStateException(s"Index $indexName is closed"))
     } else
       Try {
-        buffers(indexName).addAll(vectors)
+        val n = buffers(indexName).addAll(vectors)
+        logger.debug(s"Added ${vectors.length} new vectors to $indexName. Now contains $n vectors.")
         vectors.length
       }
   }
