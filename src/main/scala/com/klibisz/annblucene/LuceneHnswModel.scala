@@ -71,8 +71,8 @@ final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, Lucen
       Failure(new IllegalStateException(s"Index $indexName is closed"))
     } else
       Try {
-        buffers(indexName).addAll(vectors)
-        logger.debug(s"Added ${vectors.length} new vectors to $indexName.")
+        val n = buffers(indexName).addAll(vectors).length
+        logger.debug(s"Added ${vectors.length} new vectors to $indexName. Now contains $n vectors.")
         vectors.length
       }
   }
@@ -171,5 +171,4 @@ object LuceneHnswModel {
     implicit val searchParametersDecoder: Decoder[SearchParameters] = deriveDecoder
     implicit val searchParametersEncoder: Encoder[SearchParameters] = deriveEncoder
   }
-
 }
