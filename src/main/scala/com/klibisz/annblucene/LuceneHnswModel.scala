@@ -71,8 +71,8 @@ final class LuceneHnswModel extends Model[LuceneHnswModel.IndexParameters, Lucen
       Failure(new IllegalStateException(s"Index $indexName is closed"))
     } else
       Try {
-        val n = buffers(indexName).addAll(vectors)
-        logger.debug(s"Added ${vectors.length} new vectors to $indexName. Now contains $n vectors.")
+        buffers(indexName).addAll(vectors)
+        logger.debug(s"Added ${vectors.length} new vectors to $indexName.")
         vectors.length
       }
   }
