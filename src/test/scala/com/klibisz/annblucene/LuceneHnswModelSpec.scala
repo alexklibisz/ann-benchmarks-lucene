@@ -36,8 +36,10 @@ class LuceneHnswModelSpec extends AnyFreeSpec with Matchers with GloveVectors wi
     }
 
     "index vectors" in {
-      Post(s"/$indexName", getGloveVectors.map(_._2)) ~> route ~> check {
-        response.status shouldBe StatusCodes.Created
+      getGloveVectors.map(_._2).grouped(1).foreach { batch =>
+        Post(s"/$indexName", batch) ~> route ~> check {
+          response.status shouldBe StatusCodes.Created
+        }
       }
     }
 
