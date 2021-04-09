@@ -1,6 +1,6 @@
 name := "ann-benchmarks-lucene"
 
-version := "0.0.5"
+version := "0.0.6"
 
 scalaVersion := "2.13.5"
 
